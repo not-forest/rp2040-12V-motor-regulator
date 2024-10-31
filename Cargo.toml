@@ -1,0 +1,60 @@
+[package]
+name = "rp2040-12v-motor-regulator"
+version = "0.1.0"
+edition = "2021"
+description = "RP2040 Zero based H-Bridge driver for DC motor controller circuit."
+authors = ["notforest <sshkliaiev@gmail.com>"]
+repository = "https://github.com/not-forest/rp2040-12V-motor-regulator"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
+[[bin]]
+name = "rp2040-12v-motor-regulator"
+path = "src/main.rs"
+test = false
+doctest = false
+bench = false
+
+[dependencies]
+embedded-hal = { version = "0.2.5", features = ["unproven"] }
+
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+
+rp2040-hal = { version="0.9", features=["rt", "critical-section-impl"] }
+rp2040-boot2 = "0.3"
+
+defmt = "0.3"
+defmt-rtt = "0.4"
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+
+[profile.dev]
+codegen-units = 1
+debug = 2
+debug-assertions = true
+incremental = false
+opt-level = 3
+overflow-checks = true
+
+[profile.release]
+codegen-units = 1
+debug = 2
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 3
+overflow-checks = false
+
+[profile.dev.build-override]
+codegen-units = 8
+debug = false
+debug-assertions = false
+opt-level = 0
+overflow-checks = false
+
+[profile.release.build-override]
+codegen-units = 8
+debug = false
+debug-assertions = false
+opt-level = 0
+overflow-checks = false
