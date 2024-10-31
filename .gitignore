@@ -30,3 +30,8 @@ fp-info-cache
 
 #Build
 build/*
+
+
+# Added by cargo
+
+/target
