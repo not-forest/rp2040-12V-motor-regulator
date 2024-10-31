@@ -30,7 +30,7 @@ fp-info-cache
 
 #Build
 build/*
-
+*.lock
 
 # Added by cargo
 
