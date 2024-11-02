@@ -1,13 +1,20 @@
 //! Main code entry area.
 //!
-//! Since the whole system is interrupt-driven, performs a setup procedure and halts.
+//! RP2040 HAL libraries handles the bootloading part. The whole system logic is implemented within
+//! the handlers.rs module.
 #![no_std]
 #![no_main]
 
 mod handlers;
+mod motor;
+mod gpios;
 
 #[rp2040_hal::entry]
 fn main() -> ! {
-    defmt::info!("Hello world.");
-    loop {}
+    let dp = handlers::pac::Peripherals::take().unwrap();
+    let core = handlers::cortex::Peripherals::take().unwrap();
+    
+    // Overall system setup.
+    handlers::setup(dp, core);
+    handlers::main();
 }
