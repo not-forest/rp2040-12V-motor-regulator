@@ -98,6 +98,12 @@ fn gpio_setup(dp: &pac::Peripherals) {
             w.funcsel().sio()
                 .oeover().disable()
         );
+    
+        // None of the input pins shall have internal pulldowns.
+        pads_bank.gpio[pin].write(|w|
+            w.pde().clear_bit()
+        );
+
         // Disabling the output driver via GPIO_OUT registers.
         sio.gpio_oe_clr.write(|w| unsafe { w.bits(1 << pin) });
     });
@@ -118,13 +124,14 @@ fn gpio_setup(dp: &pac::Peripherals) {
     // GP15 → Generates interrupt when LOW (Switch on rotary encoder is used.)
     // GP26 → Generates interrupt on falling edge. (Rotary encoder is rotated.)
     io_bank.proc0_inte[1].write(|w| unsafe {w.bits(GPIO15_LEVEL_LOW)});
-    //io_bank.proc0_inte[3].write(|w| unsafe {w.bits(GPIO26_EDGE_LOW)});
+    io_bank.proc0_inte[3].write(|w| unsafe {w.bits(GPIO26_EDGE_LOW)});
 }
 
 /// GPIO interrupt handler.
 ///
 /// Will only be called by GP15 and GP26 input pins. Handles both encoder rotation and switch
-/// click. 
+/// click. Does not change the state of output pins, because it is handleded by the main loop, only
+/// mutates the motor configuration structure, according to the obtained input.
 #[interrupt]
 fn IO_IRQ_BANK0() {
     int::free(|cs| {
@@ -136,11 +143,13 @@ fn IO_IRQ_BANK0() {
         if let Some(sio) = siorf.as_ref() {
             // Checking the interrupt source.
             if io_bank.proc0_ints[1].read().bits() & GPIO15_LEVEL_LOW != 0 {
-                // Changing the motor speed according to the 
+                // Changing the motor direction.
                 motor_cfg.change_direction();
             } else if io_bank.proc0_ints[3].read().bits() & GPIO26_EDGE_LOW != 0 {
-                // Changing the motor direction.
+                // Changing the motor speed according to the encoder's rotation direction. 
                 motor_cfg.adjust_speed(&sio);
+
+                // This interrupt flag must be cleared.
                 io_bank.intr[3].write(|w| unsafe { w.bits(GPIO26_EDGE_LOW) });
             }
         }
