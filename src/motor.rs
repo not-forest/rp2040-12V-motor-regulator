@@ -29,9 +29,9 @@ impl MotorConfig {
     /// - Bpin == '1' → the encoder is rotated clockwise and the speed shall be increased;
     /// - Bpin == '0' → the encoder is rotated counter clockwise and the speed shall be decreased;
     pub fn adjust_speed(&mut self, sio: &SIO) {
-        const MOTOR_SPEED_GAIN: u8 = 1;
+        const MOTOR_SPEED_GAIN: u8 = 15;
 
-        if sio.gpio_in.read().bits() & (1 << BPIN) == 1 {
+        if sio.gpio_in.read().bits() & (1 << BPIN) != 0 {
             self.speed = self.speed.saturating_add(MOTOR_SPEED_GAIN);
         } else {
             self.speed = self.speed.saturating_sub(MOTOR_SPEED_GAIN);
@@ -48,7 +48,7 @@ impl MotorConfig {
 
     /// Returns a value to read into the output SIO register, based on current config state.
     pub fn leds_state_mask(&self) -> u32 {
-        const MOTOR_SPEED_STEP: u8 = u8::MAX / 5;
+        const MOTOR_SPEED_STEP: u8 = u8::MAX / 6;   // 6 possible states.
         const MOTOR_SPEED_LEDS: [usize; 5] = [S1, S2, S3, S4, S5];
 
         let mut out: u32 = 0; 
