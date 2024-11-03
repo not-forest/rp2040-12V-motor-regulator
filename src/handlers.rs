@@ -1,4 +1,6 @@
 //! Main interrupt-driver circuit logic.
+//!
+//!
 
 use core::cell::RefCell;
 use crate::gpios::*;
@@ -13,18 +15,12 @@ use cortex::{
 };
 use pac::interrupt;
 
-// Panic handler.
-panic_custom::define_panic!(|_| ());
+type Shared<T> = Mutex<RefCell<T>>;
 
-/// Second stage bootloader.
-#[link_section = ".boot2"]
-#[used]
-pub static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
-
-/// Shared SIO Interface block.
-static SIO_INT: Mutex<RefCell<Option<pac::SIO>>> = Mutex::new(RefCell::new(None));
+/// Shared SIO interface.
+static SIO_INT: Shared<Option<pac::SIO>> = Mutex::new(RefCell::new(None));
 /// Shared static motor config variable. Controls the PWM duty cycle and amount of speed leds to light.
-static MOTOR_CFG: Mutex<RefCell<MotorConfig>> = Mutex::new(RefCell::new(MotorConfig::init()));
+static MOTOR_CFG: Shared<MotorConfig> = Mutex::new(RefCell::new(MotorConfig::init()));
 
 /// System setup function.
 ///
@@ -35,13 +31,14 @@ static MOTOR_CFG: Mutex<RefCell<MotorConfig>> = Mutex::new(RefCell::new(MotorCon
 /// - puts the SIO interface into a mutual exclusive reference cell.
 pub fn setup(dp: pac::Peripherals, core: cortex::Peripherals) {
     gpio_setup(&dp);
+    pwm_setup(&dp);
 
-    /* Final interrupt free setup closure. */
-    int::free(|cs| unsafe {
+    /* Storing shared resources. */
+    int::free(|cs| {
         SIO_INT.borrow(cs).replace(Some(dp.SIO));
-
-        NVIC::unmask(pac::interrupt::IO_IRQ_BANK0);
     });
+
+    unsafe { NVIC::unmask(pac::interrupt::IO_IRQ_BANK0) };
 }
 
 /// System loop function.
@@ -49,21 +46,69 @@ pub fn setup(dp: pac::Peripherals, core: cortex::Peripherals) {
 /// Will be called after interrupt handler is done, therefore used to change
 /// the state of LEDs.
 pub fn main() -> ! {
+    // Only this code uses PWM after the setup, so this is fine. 
+    let pwm = unsafe { &*pac::PWM::ptr() };
+
     loop {
         // Changing the leds status according to the new configuration.
         int::free(|cs| {
             let motor_cfg = MOTOR_CFG.borrow(cs).borrow_mut();
             let mut siorf = SIO_INT.borrow(cs).borrow_mut();
 
-            if let Some(sio) = siorf.as_mut() {
-                sio.gpio_out.write(|w| unsafe { 
-                    w.gpio_out().bits(motor_cfg.leds_state_mask()) 
-                });
-            }
+            pwm.ch[0].cc.write(|w| unsafe {
+                w.a().bits(motor_cfg.speed as u16)
+            });
+
+            siorf
+                .as_mut()
+                .map(|sio| motor_cfg.update_leds(sio));
         });
 
         cortex_m::asm::wfi();
     }
+}
+
+/// PWM setup function for GP0.
+///
+/// Sets up the PWM control to output a 30KHz output frequency to feed the
+/// motor vis H-Bridge circuit. All constant calculations are stripped at
+/// compile time.
+fn pwm_setup(dp: &pac::Peripherals) {
+    const PWM_TOP: u16 = u8::MAX as u16;
+    const XOSC_CRYSTAL_FREQ: f32 = 12_000_000f32;                       // RP2040 Zero external osc.
+    const MOTOR_PWM_FREQ: f32 = 20_000f32;                              // Desired PWM output frequency.
+    const MOTOR_PWM_PHASE_CORRECT_FREQ: f32 = MOTOR_PWM_FREQ / 2f32;    // Before the phase correct.
+    const DIVIDER_VAL: f32 = // This follows the formula: fsys / (fpwm * TOP+1) 
+        XOSC_CRYSTAL_FREQ / (MOTOR_PWM_PHASE_CORRECT_FREQ * (PWM_TOP as f32 + 1f32));
+
+    const DIVIDER_INT: u8 = DIVIDER_VAL as u8;  // Truncates and strips the value to get whole part.
+    const DIVIDER_FRAC: u8 =                    // Obtains the fraction value at compile time with 4-bit precision.
+        ((DIVIDER_VAL - DIVIDER_INT as f32) * 16f32) as u8;
+
+    let pwmch0 = &dp.PWM.ch[0];
+    let reset_subsystem = &dp.RESETS;
+
+    // Deasserting the PWM peripheral.
+    reset_subsystem.reset.modify(|_, w| {
+        w.pwm().clear_bit()
+    });
+
+    // Divider value.
+    pwmch0.div.write(|w| unsafe {
+        w.int().bits(DIVIDER_INT)
+            .frac().bits(DIVIDER_FRAC)
+    });
+
+    // Counter TOP value.
+    pwmch0.top.write(|w| unsafe { 
+        w.top().bits(PWM_TOP)
+    });
+
+    // Enabling the PWM with phase correct.
+    pwmch0.csr.write(|w| 
+        w.en().set_bit()
+            .ph_correct().set_bit()
+    );
 }
 
 /// GPIO configuration part.
@@ -77,7 +122,7 @@ fn gpio_setup(dp: &pac::Peripherals) {
     sio.gpio_oe.reset();
     sio.gpio_out.reset();
 
-    // Deasserting the peripheral out of the reset state via reset subsystem.
+    // Deasserting GPIO related peripherals out of the reset state.
     reset_subsystem.reset.modify(|_, w| 
         w.io_bank0().clear_bit()
             .pads_bank0().clear_bit()
@@ -111,6 +156,7 @@ fn gpio_setup(dp: &pac::Peripherals) {
     // PWM pin is connected to the PWM peripheral.
     io_bank.gpio[MPIN_PWM].gpio_ctrl.write(|w| 
         w.funcsel().pwm()
+            .oeover().enable()
     );
 
     // Enabling internal pullup on SW pin, since switch is floating.
@@ -137,10 +183,11 @@ fn IO_IRQ_BANK0() {
     int::free(|cs| {
         // Only this handler uses io bank after the setup, so this is fine. 
         let io_bank = unsafe { &*pac::IO_BANK0::ptr() };
+
         let mut motor_cfg = MOTOR_CFG.borrow(cs).borrow_mut();
         let siorf = SIO_INT.borrow(cs).borrow();
 
-        if let Some(sio) = siorf.as_ref() {
+        siorf.as_ref().map(|sio| {
             // Checking the interrupt source.
             if io_bank.proc0_ints[1].read().bits() & GPIO15_LEVEL_LOW != 0 {
                 // Changing the motor direction.
@@ -152,6 +199,6 @@ fn IO_IRQ_BANK0() {
                 // This interrupt flag must be cleared.
                 io_bank.intr[3].write(|w| unsafe { w.bits(GPIO26_EDGE_LOW) });
             }
-        }
+        });
     });
 }
