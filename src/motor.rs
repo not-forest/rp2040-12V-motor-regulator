@@ -8,7 +8,7 @@ pub enum MotorDirection{ LEFT, RIGHT }
 
 /// Defines the current configuration of the motor.
 pub struct MotorConfig {
-    speed: u8,
+    pub speed: u8,
     dir: MotorDirection,
 }
 
@@ -46,25 +46,28 @@ impl MotorConfig {
         } 
     }
 
-    /// Returns a value to read into the output SIO register, based on current config state.
-    pub fn leds_state_mask(&self) -> u32 {
+
+    /// Updates status LEDs locatec on the board based on the current configuration. 
+    pub fn update_leds(&self, sio: &mut SIO) {
         const MOTOR_SPEED_STEP: u8 = u8::MAX / 6;   // 6 possible states.
         const MOTOR_SPEED_LEDS: [usize; 5] = [S1, S2, S3, S4, S5];
 
-        let mut out: u32 = 0; 
+        let mut mask: u32 = 0; 
 
         // Writing values on output pins according to the current direction.
         match self.dir {
-            LEFT => out |= (1 << LEFT_PIN) | (1 << MPIN_A),
-            RIGHT => out |= (1 << RIGHT_PIN) | (1 << MPIN_B),
+            LEFT => mask |= (1 << LEFT_PIN) | (1 << MPIN_A),
+            RIGHT => mask |= (1 << RIGHT_PIN) | (1 << MPIN_B),
         }
     
         // Writing values to the motor speed pins according to the current speed.
         MOTOR_SPEED_LEDS
             .into_iter()
             .take((self.speed / MOTOR_SPEED_STEP) as usize)
-            .for_each(|led| out |= 1 << (led as u32));
+            .for_each(|led| mask |= 1 << (led as u32));
 
-        out
+        sio.gpio_out.write(|w| unsafe { 
+            w.gpio_out().bits(mask) 
+        });
     }
 }
