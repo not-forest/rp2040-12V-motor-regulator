@@ -56,8 +56,8 @@ pub fn main() -> ! {
             let mut siorf = SIO_INT.borrow(cs).borrow_mut();
 
             if let Some(sio) = siorf.as_mut() {
-                sio.gpio_out_set.write(|w| unsafe { 
-                    w.gpio_out_set().bits(motor_cfg.leds_state_mask()) 
+                sio.gpio_out.write(|w| unsafe { 
+                    w.gpio_out().bits(motor_cfg.leds_state_mask()) 
                 });
             }
         });
@@ -108,14 +108,17 @@ fn gpio_setup(dp: &pac::Peripherals) {
     );
 
     // Enabling internal pullup on SW pin, since switch is floating.
-    pads_bank.gpio[SW].write(|w| w.pue().set_bit());
+    pads_bank.gpio[SW].write(|w| 
+        w.pde().clear_bit()
+            .pue().set_bit()
+    );
 
     // Enables interrupt on two input pins.
     //
     // GP15 → Generates interrupt when LOW (Switch on rotary encoder is used.)
     // GP26 → Generates interrupt on falling edge. (Rotary encoder is rotated.)
-    /* io_bank.proc0_inte[1].write(|w| unsafe {w.bits(GPIO15_LEVEL_LOW)});
-    io_bank.proc0_inte[3].write(|w| unsafe {w.bits(GPIO26_EDGE_LOW)}); */
+    io_bank.proc0_inte[1].write(|w| unsafe {w.bits(GPIO15_LEVEL_LOW)});
+    //io_bank.proc0_inte[3].write(|w| unsafe {w.bits(GPIO26_EDGE_LOW)});
 }
 
 /// GPIO interrupt handler.
@@ -134,11 +137,10 @@ fn IO_IRQ_BANK0() {
             // Checking the interrupt source.
             if io_bank.proc0_ints[1].read().bits() & GPIO15_LEVEL_LOW != 0 {
                 // Changing the motor speed according to the 
-                motor_cfg.adjust_speed(&sio);
-                io_bank.intr[1].write(|w| unsafe { w.bits(GPIO15_LEVEL_LOW) });
+                motor_cfg.change_direction();
             } else if io_bank.proc0_ints[3].read().bits() & GPIO26_EDGE_LOW != 0 {
                 // Changing the motor direction.
-                motor_cfg.change_direction();
+                motor_cfg.adjust_speed(&sio);
                 io_bank.intr[3].write(|w| unsafe { w.bits(GPIO26_EDGE_LOW) });
             }
         }
