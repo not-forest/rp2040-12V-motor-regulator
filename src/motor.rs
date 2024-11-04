@@ -6,9 +6,13 @@ use crate::gpios::*;
 /// Defines the current direction of the motor.
 pub enum MotorDirection{ LEFT, RIGHT }
 
+/// Defines a rotaty encoder as a state machine.
+pub enum EncoderState { IDLE, AFALL, BFALL }
+
 /// Defines the current configuration of the motor.
 pub struct MotorConfig {
     pub speed: u8,
+    state: EncoderState,
     dir: MotorDirection,
 }
 
@@ -18,23 +22,35 @@ impl MotorConfig {
     pub const fn init() -> Self {
         Self {
             speed: u8::MIN,
+            state: EncoderState::IDLE,
             dir: MotorDirection::RIGHT,
         }
     }
 
-    /// Adjusts the motor speed, based on the values between Apin and Bpin.
-    ///
-    /// Since falling edge on Apin generates the interrupt, we adjust the speed accordingly
-    /// to the current state of Bpin.
-    /// - Bpin == '1' → the encoder is rotated clockwise and the speed shall be increased;
-    /// - Bpin == '0' → the encoder is rotated counter clockwise and the speed shall be decreased;
-    pub fn adjust_speed(&mut self, sio: &SIO) {
-        const MOTOR_SPEED_GAIN: u8 = 15;
+    /// Updates the state machine's state and increases or descreases the internal
+    /// speed counter if a certain state combination is seen.
+    pub fn update_state(&mut self, new_state: EncoderState) {
+        use EncoderState::*;
+        const MOTOR_SPEED_GAIN: u8 = 5;
 
-        if sio.gpio_in.read().bits() & (1 << BPIN) != 0 {
-            self.speed = self.speed.saturating_add(MOTOR_SPEED_GAIN);
-        } else {
-            self.speed = self.speed.saturating_sub(MOTOR_SPEED_GAIN);
+        match new_state {
+            AFALL => match self.state {
+                IDLE => self.state = AFALL,
+                AFALL => (),
+                BFALL => {
+                    self.speed = self.speed.saturating_sub(MOTOR_SPEED_GAIN);
+                    self.state = IDLE;
+                }
+            },
+            BFALL => match self.state {
+                IDLE => self.state = BFALL,
+                BFALL => (),
+                AFALL => {
+                    self.speed = self.speed.saturating_add(MOTOR_SPEED_GAIN);
+                    self.state = IDLE;
+                }
+            },
+            _ => unreachable!(),
         }
     }
 
