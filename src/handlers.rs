@@ -4,7 +4,7 @@
 
 use core::cell::RefCell;
 use crate::gpios::*;
-use crate::motor::MotorConfig;
+use crate::motor::{MotorConfig, EncoderState};
 
 pub use cortex_m as cortex;
 pub use rp2040_hal::pac as pac;
@@ -27,8 +27,8 @@ static MOTOR_CFG: Shared<MotorConfig> = Mutex::new(RefCell::new(MotorConfig::ini
 /// This function sets up the following:
 /// - enables watchdog timer;
 /// - obtains the port peripheral and configures it for I/Os;
-/// - unmasks required interrupts in NVIC;
 /// - puts the SIO interface into a mutual exclusive reference cell.
+/// - unmasks required interrupts in NVIC;
 pub fn setup(dp: pac::Peripherals, core: cortex::Peripherals) {
     gpio_setup(&dp);
     pwm_setup(&dp);
@@ -170,7 +170,7 @@ fn gpio_setup(dp: &pac::Peripherals) {
     // GP15 → Generates interrupt when LOW (Switch on rotary encoder is used.)
     // GP26 → Generates interrupt on falling edge. (Rotary encoder is rotated.)
     io_bank.proc0_inte[1].write(|w| unsafe {w.bits(GPIO15_LEVEL_LOW)});
-    io_bank.proc0_inte[3].write(|w| unsafe {w.bits(GPIO26_EDGE_LOW)});
+    io_bank.proc0_inte[3].write(|w| unsafe {w.bits(GPIO26_EDGE_LOW | GPIO27_EDGE_LOW)});
 }
 
 /// GPIO interrupt handler.
@@ -183,22 +183,27 @@ fn IO_IRQ_BANK0() {
     int::free(|cs| {
         // Only this handler uses io bank after the setup, so this is fine. 
         let io_bank = unsafe { &*pac::IO_BANK0::ptr() };
-
         let mut motor_cfg = MOTOR_CFG.borrow(cs).borrow_mut();
-        let siorf = SIO_INT.borrow(cs).borrow();
 
-        siorf.as_ref().map(|sio| {
-            // Checking the interrupt source.
-            if io_bank.proc0_ints[1].read().bits() & GPIO15_LEVEL_LOW != 0 {
-                // Changing the motor direction.
-                motor_cfg.change_direction();
-            } else if io_bank.proc0_ints[3].read().bits() & GPIO26_EDGE_LOW != 0 {
-                // Changing the motor speed according to the encoder's rotation direction. 
-                motor_cfg.adjust_speed(&sio);
+        if io_bank.proc0_ints[3].read().bits() & GPIO26_EDGE_LOW != 0 {
+            // Changing the motor speed according to the encoder's rotation direction. 
+            motor_cfg.update_state(EncoderState::AFALL);
 
-                // This interrupt flag must be cleared.
-                io_bank.intr[3].write(|w| unsafe { w.bits(GPIO26_EDGE_LOW) });
-            }
-        });
+            // This interrupt flag must be cleared.
+            io_bank.intr[3].write(|w| unsafe { w.bits(GPIO26_EDGE_LOW) });
+        }
+
+        if io_bank.proc0_ints[3].read().bits() & GPIO27_EDGE_LOW != 0 {
+            // Changing the motor speed according to the encoder's rotation direction. 
+            motor_cfg.update_state(EncoderState::BFALL);
+
+            // This interrupt flag must be cleared.
+            io_bank.intr[3].write(|w| unsafe { w.bits(GPIO27_EDGE_LOW) });
+        }
+
+        if io_bank.proc0_ints[1].read().bits() & GPIO15_LEVEL_LOW != 0 {
+            // Changing the motor direction.
+            motor_cfg.change_direction();
+        }
     });
 }
