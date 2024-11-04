@@ -39,3 +39,4 @@ pub const INPUT_GPIOS: [usize; 3] = [SW, APIN, BPIN];
 /* Used to enable interrupts on certain gpio pins. */
 pub const GPIO15_LEVEL_LOW: u32 = 1 << 28;
 pub const GPIO26_EDGE_LOW: u32 = 1 << 10;
+pub const GPIO27_EDGE_LOW: u32 = 1 << 14;
