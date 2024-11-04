@@ -25,11 +25,13 @@ static MOTOR_CFG: Shared<MotorConfig> = Mutex::new(RefCell::new(MotorConfig::ini
 /// System setup function.
 ///
 /// This function sets up the following:
-/// - enables watchdog timer;
+/// - Swaps the clock source from internal ring oscillator to external XOCS.
 /// - obtains the port peripheral and configures it for I/Os;
+/// - configures the PWM to output a 20kHz regulated signal with phase correct enabled.
 /// - puts the SIO interface into a mutual exclusive reference cell.
 /// - unmasks required interrupts in NVIC;
 pub fn setup(dp: pac::Peripherals, core: cortex::Peripherals) {
+    xosc_clock_setup(&dp);
     gpio_setup(&dp);
     pwm_setup(&dp);
 
@@ -68,16 +70,47 @@ pub fn main() -> ! {
     }
 }
 
+/// Switches the system clock from the internal ROSC to external crystal oscillator supplied
+/// with the development board. This then provides a stable 12MHz signal to the whole system,
+/// which allows to calculate PWM frequency afterwards.
+fn xosc_clock_setup(dp: &pac::Peripherals) {
+    const XOCS_STARTUP_DELAY: u16 = 47;  // (fCrystal * tStable) ÷ 256
+    let xosc = &dp.XOSC;
+    let clocks = &dp.CLOCKS;
+
+    // Setting the delay for 12MHz clock.
+    xosc.startup.write(|w| unsafe {
+        w.delay().bits(XOCS_STARTUP_DELAY)
+    });
+
+    // Enabling the oscillator
+    xosc.ctrl.write(|w| 
+        w.freq_range()._1_15mhz()
+            .enable().enable()
+    );
+
+    // Wait until the oscillator becomes stable.
+    while xosc.status.read().stable().bit_is_clear() {}
+
+    // Swapping the reference clock source and enabling the system clock.
+    clocks.clk_ref_ctrl.write(|w|
+        w.src().xosc_clksrc()
+    );
+    clocks.clk_sys_ctrl.write(|w|
+        w.src().clk_ref()
+    );
+}
+
 /// PWM setup function for GP0.
 ///
-/// Sets up the PWM control to output a 30KHz output frequency to feed the
+/// Sets up the PWM control to output a 20kHz output frequency to feed the
 /// motor vis H-Bridge circuit. All constant calculations are stripped at
 /// compile time.
 fn pwm_setup(dp: &pac::Peripherals) {
     const PWM_TOP: u16 = u8::MAX as u16;
     const XOSC_CRYSTAL_FREQ: f32 = 12_000_000f32;                       // RP2040 Zero external osc.
     const MOTOR_PWM_FREQ: f32 = 20_000f32;                              // Desired PWM output frequency.
-    const MOTOR_PWM_PHASE_CORRECT_FREQ: f32 = MOTOR_PWM_FREQ / 2f32;    // Before the phase correct.
+    const MOTOR_PWM_PHASE_CORRECT_FREQ: f32 = MOTOR_PWM_FREQ * 2f32;    // Before the phase correct.
     const DIVIDER_VAL: f32 = // This follows the formula: fsys / (fpwm * TOP+1) 
         XOSC_CRYSTAL_FREQ / (MOTOR_PWM_PHASE_CORRECT_FREQ * (PWM_TOP as f32 + 1f32));
 
