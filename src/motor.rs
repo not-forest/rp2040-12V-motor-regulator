@@ -1,6 +1,7 @@
-//! Defines motor configuration related structures.
+//! Defines a motor configuration interface, which hold the current state of the h-bridge
+//! driver system and allows to modify it.
 
-use crate::handlers::pac::SIO;
+use crate::pac::{SIO, PWM};
 use crate::gpios::*;
 
 /// Defines the current direction of the motor.
@@ -10,10 +11,16 @@ pub enum MotorDirection{ LEFT, RIGHT }
 pub enum EncoderState { IDLE, AFALL, BFALL }
 
 /// Defines the current configuration of the motor.
+///
+/// This structure holds the current state of motor's speed and direction, but also holds the
+/// ownership for SIO and PWM references. 
 pub struct MotorConfig {
     pub speed: u8,
     state: EncoderState,
     dir: MotorDirection,
+
+    pub sio: Option<SIO>,
+    pub pwm: Option<PWM>,
 }
 
 use MotorDirection::*;
@@ -24,6 +31,8 @@ impl MotorConfig {
             speed: u8::MIN,
             state: EncoderState::IDLE,
             dir: MotorDirection::RIGHT,
+            sio: None,
+            pwm: None,
         }
     }
 
@@ -62,9 +71,20 @@ impl MotorConfig {
         } 
     }
 
+    /// Updates the current PWM duty cycle based on the current speed.
+    pub fn update_pwm(&mut self) {
+        self
+            .pwm
+            .as_mut()
+            .map(|pwm| 
+                pwm.ch[0].cc.write(|w| unsafe {
+                    w.a().bits(self.speed as u16)
+                })
+            );
+    }
 
-    /// Updates status LEDs locatec on the board based on the current configuration. 
-    pub fn update_leds(&self, sio: &mut SIO) {
+    /// Updates status LEDs located on the board based on the current configuration. 
+    pub fn update_leds(&mut self) {
         const MOTOR_SPEED_STEP: u8 = u8::MAX / 6;   // 6 possible states.
         const MOTOR_SPEED_LEDS: [usize; 5] = [S1, S2, S3, S4, S5];
 
@@ -82,8 +102,12 @@ impl MotorConfig {
             .take((self.speed / MOTOR_SPEED_STEP) as usize)
             .for_each(|led| mask |= 1 << (led as u32));
 
-        sio.gpio_out.write(|w| unsafe { 
-            w.gpio_out().bits(mask) 
-        });
+        self.sio
+            .as_mut()
+            .map(|sio| 
+                sio.gpio_out.write(|w| unsafe { 
+                    w.gpio_out().bits(mask) 
+                })
+            );
     }
 }
