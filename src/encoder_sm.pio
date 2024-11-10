@@ -1,0 +1,66 @@
+// Pio assembler state-machine code for handling quadrature rotary encoder inputs.
+//
+// The state handling is performed via a jump table of 16 possible states, including four 
+// error ones. This allows to prevent all possible errors that might occur due to switches
+// bouncing, therefore allows to read data from cheap ones. The PIO will produce an interrupt
+// on IRQ0 when counter clockwise rotation is encountered, and IRQ1 when clockwise.
+//
+// Three possible events can occur during at completely random time and can last for an 
+// undefined period of time:
+// - NOP (The state hasn't changed);
+// - CCW (Possibility of counter clockwise rotation. Only two of those guarantee such behavior);
+// - CW (Possibility of clockwise rotation);
+// - ERR (Edges on both pins cannot change at the same time);
+//
+// Two sequential CW or CCW state change must occur to define the proper movement errorless. Two
+// counters X and Y are used to count changes for CW and CCW respectively. If one of them will count
+// down to zero, with the other one still being unchanged, the proper movement will detected.
+
+.program encoder_sm
+.origin 0
+                        ;   | A | B | A'| B'|ðA |ðB | Event |
+    jmp listen          ;   | 0 | 0 | 0 | 0 | L | L |  NOP  |
+    jmp y-- ccw         ;   | 0 | 0 | 0 | 1 | L | ↑ |  CCW  |
+    jmp x-- cw          ;   | 0 | 0 | 1 | 0 | ↑ | L |  CW   |
+    jmp entry           ;   | 0 | 0 | 1 | 1 | ↑ | ↑ |  ERR  |
+
+    jmp x-- cw          ;   | 0 | 1 | 0 | 0 | L | ↓ |  CW   |
+    jmp listen          ;   | 0 | 1 | 0 | 1 | L | H |  NOP  |
+    jmp entry           ;   | 0 | 1 | 1 | 0 | ↑ | ↓ |  ERR  |
+    jmp y-- ccw         ;   | 0 | 1 | 1 | 1 | ↑ | H |  CCW  |
+    
+    jmp y-- ccw         ;   | 1 | 0 | 0 | 0 | ↓ | L |  CCW  |
+    jmp entry           ;   | 1 | 0 | 0 | 1 | ↓ | ↑ |  ERR  |
+    jmp listen          ;   | 1 | 0 | 1 | 0 | H | L |  NOP  |
+    jmp x-- cw          ;   | 1 | 0 | 1 | 1 | H | ↑ |  CW   |
+    
+    jmp entry           ;   | 1 | 1 | 0 | 0 | ↓ | ↓ |  ERR  |
+    jmp x-- cw          ;   | 1 | 1 | 0 | 1 | ↓ | H |  CW   |
+    jmp y-- ccw         ;   | 1 | 1 | 1 | 0 | H | ↓ |  CCW  |
+    jmp listen          ;   | 1 | 1 | 1 | 1 | H | H |  NOP  |
+
+public entry:
+.wrap_target
+    in pins, 2          ; Shifting the new state (A' | B').
+listen:
+    mov osr, isr        ; Copy new state for pushing.
+    out isr, 2          ; Shifting the last state back (A | B). This also clears the ISR register.
+    in pins, 2          ; Shifting the new state (A' | B').
+
+    mov pc, isr         ; Jump to the address of the current state change. It is guaranteed to be 4-bits long.
+
+cw:  
+    jmp !x listen [2]   ; If X counter is not zero, listens to the next change. Small delay for debouncing
+    jmp x!=y cw_irq     ; If Y was also not decremented, performing the interrupt.
+    jmp entry           ; Otherwise reseting the counters and trying again.
+cw_irq:
+    irq 1               ; CW happened two times - sending IRQ1
+    jmp entry           ; Restarting the counters
+
+ccw:  
+    jmp !y listen [2]   ; If Y counter is not zero, listens to the next change. Small delay for debouncing
+    jmp x!=y ccw_irq    ; If X was also not decremented, performing the interrupt.
+    jmp entry           ; Otherwise reseting the counters and trying again.
+ccw_irq:
+    irq 0               ; CCW happened two times - sending IRQ0
+.wrap                   ; Restarting the counters
