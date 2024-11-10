@@ -1,26 +1,23 @@
 //! Defines a motor configuration interface, which hold the current state of the h-bridge
 //! driver system and allows to modify it.
 
-use crate::pac::{SIO, PWM};
+use crate::pac::{SIO, PWM, PIO0};
 use crate::gpios::*;
 
 /// Defines the current direction of the motor.
 pub enum MotorDirection{ LEFT, RIGHT }
-
-/// Defines a rotaty encoder as a state machine.
-pub enum EncoderState { IDLE, AFALL, BFALL }
 
 /// Defines the current configuration of the motor.
 ///
 /// This structure holds the current state of motor's speed and direction, but also holds the
 /// ownership for SIO and PWM references. 
 pub struct MotorConfig {
-    pub speed: u8,
-    state: EncoderState,
+    speed: u8,
     dir: MotorDirection,
 
     pub sio: Option<SIO>,
     pub pwm: Option<PWM>,
+    pub pio: Option<PIO0>,
 }
 
 use MotorDirection::*;
@@ -29,37 +26,10 @@ impl MotorConfig {
     pub const fn init() -> Self {
         Self {
             speed: u8::MIN,
-            state: EncoderState::IDLE,
             dir: MotorDirection::RIGHT,
             sio: None,
             pwm: None,
-        }
-    }
-
-    /// Updates the state machine's state and increases or descreases the internal
-    /// speed counter if a certain state combination is seen.
-    pub fn update_state(&mut self, new_state: EncoderState) {
-        use EncoderState::*;
-        const MOTOR_SPEED_GAIN: u8 = 5;
-
-        match new_state {
-            AFALL => match self.state {
-                IDLE => self.state = AFALL,
-                AFALL => (),
-                BFALL => {
-                    self.speed = self.speed.saturating_sub(MOTOR_SPEED_GAIN);
-                    self.state = IDLE;
-                }
-            },
-            BFALL => match self.state {
-                IDLE => self.state = BFALL,
-                BFALL => (),
-                AFALL => {
-                    self.speed = self.speed.saturating_add(MOTOR_SPEED_GAIN);
-                    self.state = IDLE;
-                }
-            },
-            _ => unreachable!(),
+            pio: None,
         }
     }
 
@@ -71,8 +41,11 @@ impl MotorConfig {
         } 
     }
 
-    /// Updates the current PWM duty cycle based on the current speed.
-    pub fn update_pwm(&mut self) {
+    /// Updates the current PWM duty cycle based on the provided closure.
+    pub fn update_pwm<F>(&mut self, f: F) where 
+        F: FnOnce(u8) -> u8
+    {
+        self.speed = f(self.speed);
         self
             .pwm
             .as_mut()
