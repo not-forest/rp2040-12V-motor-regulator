@@ -7,10 +7,11 @@
 
 mod gpios;
 mod pwm;
-
-mod handlers;
 mod motor;
 mod xosc;
+mod pio;
+
+mod handlers;
 
 pub use cortex_m as cortex;
 pub use rp2040_hal::pac as pac;
@@ -23,12 +24,11 @@ panic_custom::define_panic!(|_| ());
 #[used]
 pub static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
-#[rp2040_hal::entry]
+#[cortex_m_rt::entry]
 fn main() -> ! {
     let dp = pac::Peripherals::take().unwrap();
-    let core = cortex::Peripherals::take().unwrap();
     
     // Overall system setup.
-    handlers::setup(dp, core);
+    handlers::setup(dp);
     handlers::main();
 }
