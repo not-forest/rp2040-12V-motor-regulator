@@ -6,7 +6,7 @@
 use crate::pac;
 
 /// Controls motor's speed via PWM.
-const MPIN_PWM: usize   = 0;
+const MPIN_PWM: usize       = 0;
 /// Controls motor's rotation direction. Rotates anti-clockwise when '1'.
 pub const MPIN_A: usize     = 1;
 /// Controls motor's rotation direction. Rotates clockwise when '1'.
@@ -27,11 +27,11 @@ pub const LEFT_PIN: usize   = 13;
 pub const RIGHT_PIN: usize  = 14;
 
 /// Pulled-up SPDT switch input from the rotary encoder.
-const SW: usize         = 15;
+const SW: usize             = 15;
 /// Oncoming square signal from the rotary encoder pin A.
-const APIN: usize       = 26;
+pub const APIN: usize       = 26;
 /// Oncoming square signal from the rotary encoder pin B.
-const BPIN: usize       = 27;
+pub const BPIN: usize       = 27;
 
 /// Circuit output GPIOS connected to SIO.
 const OUTPUT_GPIOS: [usize; 9] = [MPIN_A, MPIN_B, S1, S2, S3, S4, S5, LEFT_PIN, RIGHT_PIN];
@@ -40,8 +40,6 @@ const INPUT_GPIOS: [usize; 3] = [SW, APIN, BPIN];
 
 /* Used to enable interrupts on certain gpio pins. */
 pub const GPIO15_LEVEL_LOW: u32 = 1 << 28;
-pub const GPIO26_EDGE_LOW: u32 = 1 << 10;
-pub const GPIO27_EDGE_LOW: u32 = 1 << 14;
 
 /// GPIO configuration part.
 pub fn setup(dp: &pac::Peripherals) { 
@@ -71,11 +69,6 @@ pub fn setup(dp: &pac::Peripherals) {
     });
     // Configuration of all input pins.
     INPUT_GPIOS.into_iter().for_each(|pin| {
-        io_bank.gpio[pin].gpio_ctrl.write(|w|
-            w.funcsel().sio()
-                .oeover().disable()
-        );
-    
         // None of the input pins shall have internal pulldowns.
         pads_bank.gpio[pin].write(|w|
             w.pde().clear_bit()
@@ -91,16 +84,21 @@ pub fn setup(dp: &pac::Peripherals) {
             .oeover().enable()
     );
 
+    // Connecting APIN and BPIN to the PIO0 block for encoder control.
+    [APIN, BPIN].into_iter().for_each(|pin| 
+        io_bank.gpio[pin].gpio_ctrl.write(|w|
+            w.funcsel().pio0()
+                .oeover().disable()
+        )
+    );
+
     // Enabling internal pullup on SW pin, since switch is floating.
     pads_bank.gpio[SW].write(|w| 
         w.pde().clear_bit()
             .pue().set_bit()
     );
 
-    // Enables interrupt on two input pins.
-    //
-    // GP15 → Generates interrupt when LOW (Switch on rotary encoder is used.)
-    // GP26 → Generates interrupt on falling edge. (Rotary encoder is rotated.)
+    // Enables interrupt on SW pin: GP15 will generate an interrupt 
+    // when LOW (Switch on rotary encoder is used.)
     io_bank.proc0_inte[1].write(|w| unsafe {w.bits(GPIO15_LEVEL_LOW)});
-    io_bank.proc0_inte[3].write(|w| unsafe {w.bits(GPIO26_EDGE_LOW | GPIO27_EDGE_LOW)});
 }
