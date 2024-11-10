@@ -1,20 +1,22 @@
-//! Main interrupt-driver circuit logic.
+//! Main interrupt-driver system logic.
 //!
-//!
+//! Mutates the current state of the system when one of three possible interrupts are encountered.
+//! Adjusts status leds in the main program loop after each interrupt.
 
 use core::cell::RefCell;
-use crate::motor::{MotorConfig, EncoderState};
+use crate::motor::MotorConfig;
 use crate::{pac, cortex};
 
-use crate::gpios::{self, *};
-use crate::pwm;
-use crate::xosc;
+use crate::{gpios::{self, *}, pwm, xosc, pio};
 
 use cortex::{
     interrupt::{self as int, Mutex}, 
     peripheral::NVIC,
 };
 use pac::interrupt;
+
+// Motor speed added to the current spead on each encoder's rotation.
+const MOTOR_GAIN_SPEED: u8 = 5;
 
 /// Shared static motor config variable. Controls the PWM duty cycle and amount of speed leds to light.
 static MOTOR_CFG: Mutex<RefCell<MotorConfig>> = Mutex::new(RefCell::new(MotorConfig::init()));
@@ -23,13 +25,15 @@ static MOTOR_CFG: Mutex<RefCell<MotorConfig>> = Mutex::new(RefCell::new(MotorCon
 ///
 /// This function sets up the following:
 /// - Swaps the clock source from internal ring oscillator to external XOCS.
-/// - obtains the port peripheral and configures it for I/Os;
+/// - obtains the gpio port peripheral and configures it for I/Os;
+/// - loads the program to the pio state machine for rotary encoder management.
 /// - configures the PWM to output a 20kHz regulated signal with phase correct enabled.
 /// - puts the SIO interface into a mutual exclusive reference cell.
 /// - unmasks required interrupts in NVIC;
-pub fn setup(dp: pac::Peripherals, core: cortex::Peripherals) {
+pub fn setup(dp: pac::Peripherals) {
     xosc::setup(&dp);
     gpios::setup(&dp);
+    pio::setup(&dp);
     pwm::setup(&dp);
 
     /* Storing shared resources. */
@@ -39,9 +43,15 @@ pub fn setup(dp: pac::Peripherals, core: cortex::Peripherals) {
         // Moving the ownership of those interfaces to the motor config.
         motor_cfg.sio.replace(dp.SIO);
         motor_cfg.pwm.replace(dp.PWM);
+        motor_cfg.pio.replace(dp.PIO0);
     });
 
-    unsafe { NVIC::unmask(pac::interrupt::IO_IRQ_BANK0) };
+    /* Enabling interrupts. */
+    unsafe { 
+        NVIC::unmask(pac::interrupt::IO_IRQ_BANK0); 
+        NVIC::unmask(pac::interrupt::PIO0_IRQ_0);
+        NVIC::unmask(pac::interrupt::PIO0_IRQ_1);
+    };
 }
 
 /// System loop function.
@@ -54,7 +64,6 @@ pub fn main() -> ! {
         int::free(|cs| {
             let mut motor_cfg = MOTOR_CFG.borrow(cs).borrow_mut();
 
-            motor_cfg.update_pwm();
             motor_cfg.update_leds();
         });
 
@@ -69,30 +78,53 @@ pub fn main() -> ! {
 /// mutates the motor configuration structure, according to the obtained input.
 #[interrupt]
 fn IO_IRQ_BANK0() {
+    // IO bank is not shared between other interrupts, so this is safe. 
+    let io_bank = unsafe { pac::IO_BANK0::PTR.read() };
+
     int::free(|cs| {
-        // Only this handler uses io bank after the setup, so this is fine. 
-        let io_bank = unsafe { &*pac::IO_BANK0::ptr() };
         let mut motor_cfg = MOTOR_CFG.borrow(cs).borrow_mut();
-
-        if io_bank.proc0_ints[3].read().bits() & GPIO26_EDGE_LOW != 0 {
-            // Changing the motor speed according to the encoder's rotation direction. 
-            motor_cfg.update_state(EncoderState::AFALL);
-
-            // This interrupt flag must be cleared.
-            io_bank.intr[3].write(|w| unsafe { w.bits(GPIO26_EDGE_LOW) });
-        }
-
-        if io_bank.proc0_ints[3].read().bits() & GPIO27_EDGE_LOW != 0 {
-            // Changing the motor speed according to the encoder's rotation direction. 
-            motor_cfg.update_state(EncoderState::BFALL);
-
-            // This interrupt flag must be cleared.
-            io_bank.intr[3].write(|w| unsafe { w.bits(GPIO27_EDGE_LOW) });
-        }
 
         if io_bank.proc0_ints[1].read().bits() & GPIO15_LEVEL_LOW != 0 {
             // Changing the motor direction.
             motor_cfg.change_direction();
         }
+    });
+}
+
+/// PIO0 IRQ0 interrupt.
+///
+/// Caused by PIO internal program when the rotary encoder is rotated counter clockwise.
+#[interrupt]
+fn PIO0_IRQ_0() {
+    int::free(|cs| {
+        let mut motor_cfg = MOTOR_CFG.borrow(cs).borrow_mut();
+        // Decrementing the PWM duty cycle.
+        motor_cfg.update_pwm(|s| s.saturating_sub(MOTOR_GAIN_SPEED));
+        
+        // IRQ0 must be cleared.
+        motor_cfg.pio
+            .as_ref()
+            .map(|pio0| unsafe { 
+                pio0.irq.write(|w| w.irq().bits(1 << 0))
+            });
+    });
+}
+
+/// PIO0 IRQ1 interrupt.
+///
+/// Caused by PIO internal program when the rotary encoder is rotated clockwise.
+#[interrupt]
+fn PIO0_IRQ_1() {
+    int::free(|cs| {
+        let mut motor_cfg = MOTOR_CFG.borrow(cs).borrow_mut();
+        // Incrementing the PWM duty cycle.
+        motor_cfg.update_pwm(|s| s.saturating_add(MOTOR_GAIN_SPEED));
+        
+        // IRQ1 must be cleared.
+        motor_cfg.pio
+            .as_ref()
+            .map(|pio0| unsafe { 
+                pio0.irq.write(|w| w.irq().bits(1 << 1))
+            });
     });
 }
