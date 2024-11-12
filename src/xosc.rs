@@ -12,9 +12,9 @@ pub fn setup(dp: &pac::Peripherals) {
     let clocks = &dp.CLOCKS;
 
     // Setting the delay for 12MHz clock.
-    xosc.startup.write(|w| unsafe {
-        w.delay().bits(XOSC_STARTUP_DELAY)
-    });
+    xosc.startup.write(|w|
+        w.delay().variant(XOSC_STARTUP_DELAY)
+    );
 
     // Enabling the oscillator
     xosc.ctrl.write(|w| 

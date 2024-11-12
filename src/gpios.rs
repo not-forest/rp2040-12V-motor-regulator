@@ -65,7 +65,7 @@ pub fn setup(dp: &pac::Peripherals) {
                 .oeover().enable()
         );
         // Enabling the output driver via GPIO_OUT registers.
-        sio.gpio_oe_set.write(|w| unsafe { w.bits(1 << pin) });
+        sio.gpio_oe_set.write(|w| w.gpio_oe_set().variant(1 << pin));
     });
     // Configuration of all input pins.
     INPUT_GPIOS.into_iter().for_each(|pin| {
@@ -75,7 +75,7 @@ pub fn setup(dp: &pac::Peripherals) {
         );
 
         // Disabling the output driver via GPIO_OUT registers.
-        sio.gpio_oe_clr.write(|w| unsafe { w.bits(1 << pin) });
+        sio.gpio_oe_clr.write(|w| w.gpio_oe_clr().variant(1 << pin));
     });
 
     // PWM pin is connected to the PWM peripheral.

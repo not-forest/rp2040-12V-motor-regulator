@@ -104,9 +104,9 @@ fn PIO0_IRQ_0() {
         // IRQ0 must be cleared.
         motor_cfg.pio
             .as_ref()
-            .map(|pio0| unsafe { 
-                pio0.irq.write(|w| w.irq().bits(1 << 0))
-            });
+            .map(|pio0|
+                pio0.irq.write(|w| w.irq().variant(1 << 0))
+            );
     });
 }
 
@@ -123,8 +123,8 @@ fn PIO0_IRQ_1() {
         // IRQ1 must be cleared.
         motor_cfg.pio
             .as_ref()
-            .map(|pio0| unsafe { 
-                pio0.irq.write(|w| w.irq().bits(1 << 1))
-            });
+            .map(|pio0| 
+                pio0.irq.write(|w| w.irq().variant(1 << 1))
+            );
     });
 }

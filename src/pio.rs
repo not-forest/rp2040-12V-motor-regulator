@@ -42,27 +42,27 @@ pub fn setup(dp: &pac::Peripherals) {
         .take(pio_file.program.code.len())
         .enumerate()
         .for_each(|(i, reg)| 
-            reg.write(|w| unsafe {
-                w.instr_mem0().bits(pio_file.program.code[i])
-            })
+            reg.write(|w|
+                w.instr_mem0().variant(pio_file.program.code[i])
+            )
         );
 
     // Mapping the IN base offset for the first state machine to be APIN.
     // This will cause that BPIN is at offset 1, allowing the state machine
     // to read APIN and BPIN as two first bits respectively.
-    sm0.sm_pinctrl.write(|w| unsafe { 
-        w.in_base().bits(APIN as u8)
-    });
+    sm0.sm_pinctrl.write(|w| 
+        w.in_base().variant(APIN as u8)
+    );
     // Setting the clock divider for the state machine.
-    sm0.sm_clkdiv.write(|w| unsafe { 
-        w.int().bits(DIVIDER_INT)
-            .frac().bits(DIVIDER_FRAC)
-    });
+    sm0.sm_clkdiv.write(|w| 
+        w.int().variant(DIVIDER_INT)
+            .frac().variant(DIVIDER_FRAC)
+    );
     // Setting additional execution flags for the state machine.
-    sm0.sm_execctrl.write(|w| unsafe {
-        w.wrap_top().bits(pio_file.program.wrap.source)
-            .wrap_bottom().bits(pio_file.program.wrap.target)
-    });
+    sm0.sm_execctrl.write(|w|
+        w.wrap_top().variant(pio_file.program.wrap.source)
+            .wrap_bottom().variant(pio_file.program.wrap.target)
+    );
     // Causing the ISR register to shift values from the LSB. This is required for the program.
     sm0.sm_shiftctrl.write(|w|
         w.in_shiftdir().clear_bit()
@@ -78,13 +78,13 @@ pub fn setup(dp: &pac::Peripherals) {
     ); 
 
     // Restarting the state machine's internal state.
-    pio0.ctrl.modify(|_, w| unsafe {
-        w.bits(1 << 4)
-    });
+    pio0.ctrl.modify(|_, w|
+        w.sm_restart().variant(1u8)
+    );
     // Restarting state machine's clock divider from an initial phase of 0.
-    pio0.ctrl.modify(|_, w| unsafe {
-        w.bits(1 << 8)
-    });
+    pio0.ctrl.modify(|_, w|
+        w.clkdiv_restart().variant(1u8)
+    );
 
     // Force the state machine to jump to the program start.
     sm0.sm_instr.write(|w| unsafe {
@@ -92,7 +92,7 @@ pub fn setup(dp: &pac::Peripherals) {
     });
 
     // Enabling the state machine's logic.
-    pio0.ctrl.modify(|_, w| unsafe {
-        w.bits(1)
-    });
+    pio0.ctrl.modify(|_, w|
+        w.sm_enable().variant(1u8)
+    );
 }

@@ -28,15 +28,15 @@ pub fn setup(dp: &pac::Peripherals) {
     });
 
     // Divider value.
-    pwmch0.div.write(|w| unsafe {
-        w.int().bits(DIVIDER_INT)
-            .frac().bits(DIVIDER_FRAC)
-    });
+    pwmch0.div.write(|w|
+        w.int().variant(DIVIDER_INT)
+            .frac().variant(DIVIDER_FRAC)
+    );
 
     // Counter TOP value.
-    pwmch0.top.write(|w| unsafe { 
-        w.top().bits(PWM_TOP)
-    });
+    pwmch0.top.write(|w| 
+        w.top().variant(PWM_TOP)
+    );
 
     // Enabling the PWM with phase correct.
     pwmch0.csr.write(|w| 
