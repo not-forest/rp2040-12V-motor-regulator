@@ -73,20 +73,20 @@ pub fn main() -> ! {
 
 /// GPIO interrupt handler.
 ///
-/// Will only be called by GP15 and GP26 input pins. Handles both encoder rotation and switch
-/// click. Does not change the state of output pins, because it is handleded by the main loop, only
-/// mutates the motor configuration structure, according to the obtained input.
+/// Will only be called by GPIO15 click input.
 #[interrupt]
 fn IO_IRQ_BANK0() {
     // IO bank is not shared between other interrupts, so this is safe. 
-    let io_bank = unsafe { pac::IO_BANK0::PTR.read() };
+    let io_bank = unsafe { &*pac::IO_BANK0::ptr() };
 
     int::free(|cs| {
         let mut motor_cfg = MOTOR_CFG.borrow(cs).borrow_mut();
 
-        if io_bank.proc0_ints[1].read().bits() & GPIO15_LEVEL_LOW != 0 {
+        if io_bank.proc0_ints[1].read().bits() & GPIO15_EDGE_HIGH != 0 {
             // Changing the motor direction.
             motor_cfg.change_direction();
+            cortex_m::asm::delay(12000); // This will cause one ms. debounce delay
+            io_bank.intr[1].write(|w| unsafe { w.bits(GPIO15_EDGE_HIGH) });
         }
     });
 }
