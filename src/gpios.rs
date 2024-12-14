@@ -38,8 +38,7 @@ const OUTPUT_GPIOS: [usize; 9] = [MPIN_A, MPIN_B, S1, S2, S3, S4, S5, LEFT_PIN, 
 /// Circuit input GPIOS connected to SIO.
 const INPUT_GPIOS: [usize; 3] = [SW, APIN, BPIN];
 
-/* Used to enable interrupts on certain gpio pins. */
-pub const GPIO15_LEVEL_LOW: u32 = 1 << 28;
+pub const GPIO15_EDGE_HIGH: u32 = 1 << 31;
 
 /// GPIO configuration part.
 pub fn setup(dp: &pac::Peripherals) { 
@@ -74,6 +73,10 @@ pub fn setup(dp: &pac::Peripherals) {
             w.pde().clear_bit()
         );
 
+        io_bank.gpio[pin].gpio_ctrl.write(|w|
+            w.oeover().disable()
+        );
+
         // Disabling the output driver via GPIO_OUT registers.
         sio.gpio_oe_clr.write(|w| w.gpio_oe_clr().variant(1 << pin));
     });
@@ -99,6 +102,6 @@ pub fn setup(dp: &pac::Peripherals) {
     );
 
     // Enables interrupt on SW pin: GP15 will generate an interrupt 
-    // when LOW (Switch on rotary encoder is used.)
-    io_bank.proc0_inte[1].write(|w| unsafe {w.bits(GPIO15_LEVEL_LOW)});
+    // when LOW-to-HIGH translation (Switch on rotary encoder is used.)
+    io_bank.proc0_inte[1].write(|w| unsafe {w.bits(GPIO15_EDGE_HIGH)});
 }
